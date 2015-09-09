@@ -2,11 +2,13 @@ require 'puppet/indirector/report/rest'
 require 'puppet/util/autoload'
 require 'puppetx/policy'
 require 'puppetx/policy/auto_spec'
+require 'puppetx/policy/spec'
 require 'rubygems'
 require 'rspec'
 require 'serverspec' 
 require 'stringio'
 require 'facter' 
+require 'fileutils'
 
 
 module PuppetSpecReport
@@ -22,7 +24,18 @@ class Puppet::Transaction::Report::RestSpec < Puppet::Transaction::Report::Rest
     @processor ||= indirection.terminus(:rest)
   end                                                 
 
+  
   def save(request)
+    def modules(request)
+      modules = Set.new
+      Puppet::Resource::Catalog.indirection.find(request.instance.host).resources.each do |res|
+        if res.class? and res[:name] != 'main' and res[:name] != 'Settings'
+          modules.add(res[:name].downcase)
+        end
+      end
+      return modules
+    end
+
     # Load plugins dynamically
     autoloader = Puppet::Util::Autoload.new(self, "puppetx/policy/auto_spec", :wrap => false)
     autoloader.loadall
@@ -32,7 +45,12 @@ class Puppet::Transaction::Report::RestSpec < Puppet::Transaction::Report::Rest
     # TODO: Check that we get the catalog from cache
     resources = Puppet::Resource::Catalog.indirection.find(request.instance.host).resources
     spec_dir = File.join(Puppet[:vardir], 'policy', 'server')
+    if File.directory? spec_dir
+      FileUtils.rm_rf spec_dir
+    end
+    FileUtils.mkdir_p spec_dir
     Puppetx::Policy::AutoSpec.gen_auto_spec_files(resources, spec_dir)
+    Puppetx::Policy::Spec.copy_spec_files(modules(request), spec_dir)
     Puppet.debug('Generated auto_spec files')
 
     # Extend report
